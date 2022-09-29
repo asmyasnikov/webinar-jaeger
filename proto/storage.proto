@@ -1,0 +1,25 @@
+syntax = "proto3";
+package storage;
+
+option go_package="./";
+
+service Storage {
+    rpc Put (PutRequest) returns (PutResponse);
+    rpc Get (GetRequest) returns (GetResponse);
+}
+
+message PutRequest {
+    string url = 1;
+}
+
+message PutResponse {
+    string hash = 1;
+}
+
+message GetRequest {
+    string hash = 1;
+}
+
+message GetResponse {
+    string url = 1;
+}
