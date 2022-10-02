@@ -25,7 +25,7 @@ import (
 
 const (
 	applicationID = "cache"
-	port          = 5301
+	port          = 5302
 )
 
 func tracerProvider(url string) (*tracesdk.TracerProvider, error) {
@@ -75,6 +75,7 @@ func main() {
 	if err != nil {
 		span.SetAttributes(attribute.Bool("error", true))
 		span.RecordError(err)
+		fmt.Println(err)
 		return
 	}
 
@@ -82,6 +83,7 @@ func main() {
 	if err != nil {
 		span.SetAttributes(attribute.Bool("error", true))
 		span.RecordError(err)
+		fmt.Println(err)
 		return
 	}
 
@@ -98,6 +100,9 @@ func main() {
 
 	go func() {
 		if err := grpcServer.Serve(listener); err != nil {
+			span.SetAttributes(attribute.Bool("error", true))
+			span.RecordError(err)
+			fmt.Println(err)
 			close(ch)
 		}
 	}()
@@ -107,6 +112,6 @@ func main() {
 	for range ch {
 		fmt.Println("shutdown...")
 		span.AddEvent("received interrupt signal")
-		grpcServer.GracefulStop()
+		return
 	}
 }

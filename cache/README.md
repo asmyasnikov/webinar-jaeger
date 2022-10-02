@@ -1,4 +1,4 @@
-# Storage gRPC service
+# Cache gRPC service
 
 Run server
 ```

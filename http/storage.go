@@ -66,12 +66,14 @@ func (ss coalesceStorage) Put(ctx context.Context, url, hash string) (err error)
 	errs := make([]error, 0, len(ss))
 	for _, s := range ss {
 		err = s.Put(ctx, url, hash)
-		if err == nil {
-			return nil
+		if err != nil {
+			errs = append(errs, err)
 		}
-		errs = append(errs, err)
 	}
-	return fmt.Errorf("get failed: %v", errs)
+	if len(errs) > 0 {
+		return fmt.Errorf("get failed: %v", errs)
+	}
+	return nil
 }
 
 type storage struct {

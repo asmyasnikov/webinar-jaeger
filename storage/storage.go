@@ -105,13 +105,22 @@ func initSchema(ctx context.Context, tr trace.Tracer, db *sql.DB, prefix string)
 		span.End()
 	}()
 	return retry.Do(ctx, db, func(ctx context.Context, cc *sql.Conn) error {
-		_, err = cc.ExecContext(
-			ydb.WithQueryMode(ctx, ydb.SchemeQueryMode),
-			fmt.Sprintf("DROP TABLE `%s`", path.Join(prefix, "urls")),
-		)
+		db, err := ydb.Unwrap(cc)
 		if err != nil {
-			_, _ = fmt.Fprintf(os.Stdout, "warn: drop series table failed: %v", err)
+			return err
 		}
+
+		s, err := db.Table().CreateSession(ctx)
+		if err != nil {
+			return err
+		}
+		defer s.Close(ctx)
+
+		_, err = s.DescribeTable(ctx, path.Join(prefix, "urls"))
+		if err == nil {
+			return nil
+		}
+
 		_, err = cc.ExecContext(
 			ydb.WithQueryMode(ctx, ydb.SchemeQueryMode),
 			fmt.Sprintf(`

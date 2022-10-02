@@ -82,6 +82,7 @@ func main() {
 	if err != nil {
 		span.SetAttributes(attribute.Bool("error", true))
 		span.RecordError(err)
+		fmt.Println(err)
 		return
 	}
 	defer db.Close(ctx)
@@ -90,6 +91,7 @@ func main() {
 	if err != nil {
 		span.SetAttributes(attribute.Bool("error", true))
 		span.RecordError(err)
+		fmt.Println(err)
 		return
 	}
 	defer connector.Close()
@@ -98,6 +100,7 @@ func main() {
 	if err != nil {
 		span.SetAttributes(attribute.Bool("error", true))
 		span.RecordError(err)
+		fmt.Println(err)
 		return
 	}
 
@@ -105,6 +108,7 @@ func main() {
 	if err != nil {
 		span.SetAttributes(attribute.Bool("error", true))
 		span.RecordError(err)
+		fmt.Println(err)
 		return
 	}
 
@@ -121,15 +125,18 @@ func main() {
 
 	go func() {
 		if err := grpcServer.Serve(listener); err != nil {
+			span.SetAttributes(attribute.Bool("error", true))
+			span.RecordError(err)
+			fmt.Println(err)
 			close(ch)
 		}
 	}()
 
-	fmt.Printf("Start starege service on port %d...\n", port)
+	fmt.Printf("Start storage service on port %d...\n", port)
 
 	for range ch {
 		fmt.Println("shutdown...")
 		span.AddEvent("received interrupt signal")
-		grpcServer.GracefulStop()
+		return
 	}
 }

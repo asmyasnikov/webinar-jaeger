@@ -3,6 +3,7 @@ module github.com/asmyasnikov/webinar-jaeger/server
 go 1.18
 
 require (
+	github.com/jellydator/ttlcache/v3 v3.0.0
 	github.com/ydb-platform/ydb-go-sdk/v3 v3.38.2
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.36.1
 	go.opentelemetry.io/contrib/propagators/jaeger v1.10.0

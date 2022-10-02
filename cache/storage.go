@@ -3,8 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
-	"sync"
+	"time"
 
+	"github.com/jellydator/ttlcache/v3"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
@@ -15,7 +16,7 @@ type storage struct {
 	pb.UnimplementedStorageServer
 
 	tr   trace.Tracer
-	urls sync.Map
+	urls *ttlcache.Cache[string, string]
 }
 
 func (s *storage) Put(ctx context.Context, request *pb.PutRequest) (response *pb.PutResponse, err error) {
@@ -32,7 +33,7 @@ func (s *storage) Put(ctx context.Context, request *pb.PutRequest) (response *pb
 		}
 		span.End()
 	}()
-	s.urls.Store(request.GetHash(), request.GetUrl())
+	s.urls.Set(request.GetHash(), request.GetUrl(), 0)
 	return &pb.PutResponse{}, nil
 }
 
@@ -51,9 +52,9 @@ func (s *storage) Get(ctx context.Context, request *pb.GetRequest) (response *pb
 		}
 		span.End()
 	}()
-	if v, ok := s.urls.Load(request.GetHash()); ok {
+	if url := s.urls.Get(request.GetHash()); url != nil {
 		return &pb.GetResponse{
-			Url: v.(string),
+			Url: url.Value(),
 		}, nil
 	}
 	return nil, fmt.Errorf("url for hash '%s' not found", request.GetHash())
@@ -71,5 +72,9 @@ func newStorage(ctx context.Context, tr trace.Tracer) (_ *storage, err error) {
 
 	return &storage{
 		tr: tr,
+		urls: ttlcache.New[string, string](
+			ttlcache.WithCapacity[string, string](5),
+			ttlcache.WithTTL[string, string](time.Minute),
+		),
 	}, nil
 }
