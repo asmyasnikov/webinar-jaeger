@@ -69,7 +69,10 @@ func main() {
 
 	span.AddEvent("auth client initialized")
 
-	s, err := initStorages(ctx, tr, "localhost:5300")
+	s, err := initStorages(ctx, tr,
+		"localhost:5301", // cache
+		"localhost:5300", // database
+	)
 	if err != nil {
 		span.SetAttributes(attribute.Bool("error", true))
 		span.RecordError(err)

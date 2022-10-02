@@ -4,14 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"github.com/ydb-platform/ydb-go-sdk/v3"
-	"github.com/ydb-platform/ydb-go-sdk/v3/retry"
-	"go.opentelemetry.io/otel/attribute"
 	"os"
 	"path"
 
-	pb "github.com/asmyasnikov/webinar-jaeger/server/pb"
+	"github.com/ydb-platform/ydb-go-sdk/v3"
+	"github.com/ydb-platform/ydb-go-sdk/v3/retry"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+
+	pb "github.com/asmyasnikov/webinar-jaeger/server/pb"
 )
 
 type storage struct {
@@ -92,9 +93,6 @@ func (s *storage) Get(ctx context.Context, request *pb.GetRequest) (response *pb
 	return response, err
 }
 
-func (s *storage) mustEmbedUnimplementedStorageServer() {
-}
-
 func initSchema(ctx context.Context, tr trace.Tracer, db *sql.DB, prefix string) (err error) {
 	ctx, span := tr.Start(ctx, "initSchema")
 	defer func() {
@@ -144,8 +142,6 @@ func newStorage(ctx context.Context, tr trace.Tracer, db *sql.DB, prefix string)
 		if err != nil {
 			span.SetAttributes(attribute.Bool("error", true))
 			span.RecordError(err)
-		} else {
-			span.AddEvent("put successful")
 		}
 		span.End()
 	}()

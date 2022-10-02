@@ -2,18 +2,15 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
+	"google.golang.org/grpc"
 	"log"
 	"net"
 	"os"
 	"os/signal"
 	"time"
 
-	ydbTracing "github.com/ydb-platform/ydb-go-sdk-opentracing"
-	ydb "github.com/ydb-platform/ydb-go-sdk/v3"
-	"github.com/ydb-platform/ydb-go-sdk/v3/balancers"
-	"github.com/ydb-platform/ydb-go-sdk/v3/trace"
+	_ "github.com/ydb-platform/ydb-go-sdk/v3"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	jaegerPropogator "go.opentelemetry.io/contrib/propagators/jaeger"
 	"go.opentelemetry.io/otel"
@@ -22,14 +19,13 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	tracesdk "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.12.0"
-	"google.golang.org/grpc"
 
 	pb "github.com/asmyasnikov/webinar-jaeger/server/pb"
 )
 
 const (
-	applicationID = "storage"
-	port          = 5300
+	applicationID = "cache"
+	port          = 5301
 )
 
 func tracerProvider(url string) (*tracesdk.TracerProvider, error) {
@@ -75,26 +71,7 @@ func main() {
 	ctx, span := tr.Start(ctx, "main")
 	defer span.End()
 
-	db, err := ydb.Open(ctx, "grpc://localhost:2136/local",
-		ydb.WithBalancer(balancers.SingleConn()),
-		ydbTracing.WithTraces(trace.DetailsAll),
-	)
-	if err != nil {
-		span.SetAttributes(attribute.Bool("error", true))
-		span.RecordError(err)
-		return
-	}
-	defer db.Close(ctx)
-
-	connector, err := ydb.Connector(db)
-	if err != nil {
-		span.SetAttributes(attribute.Bool("error", true))
-		span.RecordError(err)
-		return
-	}
-	defer connector.Close()
-
-	s, err := newStorage(ctx, tr, sql.OpenDB(connector), db.Name())
+	s, err := newStorage(ctx, tr)
 	if err != nil {
 		span.SetAttributes(attribute.Bool("error", true))
 		span.RecordError(err)
