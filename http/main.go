@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"time"
 
@@ -13,7 +12,6 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	tracesdk "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.12.0"
-	"go.opentelemetry.io/otel/trace"
 )
 
 const applicationID = "http"
@@ -71,39 +69,20 @@ func main() {
 
 	span.AddEvent("auth client initialized")
 
-	token, err := a.Login(ctx, "user1", "user1")
+	s, err := initStorages(ctx, tr)
 	if err != nil {
-		span.RecordError(err)
-	} else {
 		span.SetAttributes(attribute.Bool("error", true))
-		span.RecordError(fmt.Errorf("unexpected successful result"), trace.WithAttributes(attribute.String("token", token)))
+		span.RecordError(err)
+		panic(err)
+	}
+	defer s.Close()
+
+	h, err := newHandlers(ctx, tr, a, s)
+	if err != nil {
+		span.SetAttributes(attribute.Bool("error", true))
+		span.RecordError(err)
+		panic(err)
 	}
 
-	token, err = a.Login(ctx, "user", "user1")
-	if err != nil {
-		span.RecordError(err)
-	} else {
-		span.SetAttributes(attribute.Bool("error", true))
-		span.RecordError(fmt.Errorf("unexpected successful result"), trace.WithAttributes(attribute.String("token", token)))
-	}
-
-	token, err = a.Login(ctx, "user", "user")
-	if err != nil {
-		span.SetAttributes(attribute.Bool("error", true))
-		span.RecordError(err)
-	}
-
-	err = a.Validate(ctx, "azaza")
-	if err != nil {
-		span.RecordError(err)
-	} else {
-		span.SetAttributes(attribute.Bool("error", true))
-		span.RecordError(fmt.Errorf("unexpected successful result"))
-	}
-
-	err = a.Validate(ctx, token)
-	if err != nil {
-		span.SetAttributes(attribute.Bool("error", true))
-		span.RecordError(err)
-	}
+	h.run(ctx, 8080)
 }

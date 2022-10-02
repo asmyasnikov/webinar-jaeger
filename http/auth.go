@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"time"
 
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/otel/attribute"
@@ -41,7 +42,7 @@ func (a *auth) Close() error {
 	return a.conn.Close()
 }
 
-func (a *auth) Login(ctx context.Context, user, password string) (token string, err error) {
+func (a *auth) Login(ctx context.Context, user, password string) (token string, expireAt time.Time, err error) {
 	ctx, span := a.tr.Start(ctx, "login")
 	defer span.End()
 
@@ -60,10 +61,10 @@ func (a *auth) Login(ctx context.Context, user, password string) (token string, 
 		Password: password,
 	})
 	if err != nil {
-		return token, err
+		return token, expireAt, err
 	}
 
-	return response.GetToken(), nil
+	return response.GetToken(), response.GetExpireAt().AsTime(), nil
 }
 
 func (a *auth) Validate(ctx context.Context, token string) (err error) {

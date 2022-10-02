@@ -1,7 +1,10 @@
 syntax = "proto3";
+
 package auth;
 
 option go_package="./";
+
+import "google/protobuf/timestamp.proto";
 
 service Auth {
     rpc Login (LoginRequest) returns (LoginResponse);
@@ -15,6 +18,7 @@ message LoginRequest {
 
 message LoginResponse {
     string token = 1;
+    google.protobuf.Timestamp expire_at = 2;
 }
 
 message ValidateRequest {

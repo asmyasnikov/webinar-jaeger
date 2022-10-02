@@ -1,4 +1,3 @@
-extern crate redis;
 use auth::auth_server::{Auth, AuthServer};
 use auth::{LoginRequest, LoginResponse, ValidateRequest, ValidateResponse};
 use once_cell::sync::Lazy;
@@ -9,10 +8,13 @@ use opentelemetry::{
     trace::{Span, Tracer},
     KeyValue,
 };
-use redis::Commands;
+use prost_types::Timestamp;
 use std::collections::HashMap;
+use std::ops::Add;
+use std::time::{Duration, SystemTime};
 use tonic::{transport::Server, Request, Response, Status};
 use uuid::Uuid;
+use r2d2_redis::{r2d2, redis::Commands, RedisConnectionManager};
 
 const APPLICATION_ID: &str = "auth";
 
@@ -68,7 +70,7 @@ impl<'a> Extractor for MetadataMap<'a> {
 
 pub struct AuthService {
     session_id: String,
-    db: redis::Client,
+    pool: r2d2::Pool<RedisConnectionManager>,
 }
 
 #[tonic::async_trait]
@@ -102,11 +104,18 @@ impl Auth for AuthService {
 
         let token = Uuid::new_v4().hyphenated().to_string();
 
-        let mut conn = self.db.get_connection().unwrap();
+        let mut conn = self.pool.get().unwrap();
 
-        let _: () = conn.set_ex(&token, &self.session_id, 60 * 1000).unwrap();
+        let ttl = Duration::from_secs(60);
 
-        Ok(Response::new(LoginResponse { token }))
+        let _: () = conn.set_ex(&token, &self.session_id, ttl.as_millis() as usize).unwrap();
+
+        let expire_at = std::option::Option::Some(Timestamp::from(SystemTime::now().add(ttl)));
+
+        Ok(Response::new(LoginResponse { 
+            token,
+            expire_at,
+         }))
     }
     async fn validate(
         &self,
@@ -119,12 +128,19 @@ impl Auth for AuthService {
 
         let token = request.into_inner().token;
 
-        let mut conn = self.db.get_connection().unwrap();
+        let mut conn = self.pool.get().unwrap();
 
-        match conn.get::<&std::string::String, redis::Value>(&token) {
+        match conn.get::<&std::string::String, r2d2_redis::redis::Value>(&token) {
             Ok(value) => match value {
-                redis::Value::Data(session_id) => {
-                    let session_id = String::from_utf8(session_id).expect("invalid UTF-8");
+                r2d2_redis::redis::Value::Data(session_id) => {
+                    let session_id = match String::from_utf8(session_id) {
+                        Ok(session_id) => session_id,
+                        Err(err) => {
+                            span.set_attribute(KeyValue::new("error", true));
+                            span.record_error(&err);
+                            return Err(Status::internal(err.to_string()));
+                        }
+                    };
                     if session_id != self.session_id {
                         let err = Status::unauthenticated("wrong session ID");
                         span.set_attribute(KeyValue::new("error", true));
@@ -153,10 +169,10 @@ impl Auth for AuthService {
 }
 
 impl AuthService {
-    fn new(db: redis::Client) -> Self {
+    fn new(pool: r2d2::Pool<RedisConnectionManager>) -> Self {
         let session_id = Uuid::new_v4().hyphenated().to_string();
 
-        AuthService { session_id, db }
+        AuthService { session_id, pool }
     }
 }
 
@@ -179,9 +195,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _tracer = tracing_init()?;
     println!("tracer initialized");
     let addr = "127.0.0.1:50051".parse()?;
-    let db = redis::Client::open("redis://127.0.0.1")?;
+    let manager = RedisConnectionManager::new("redis://127.0.0.1").unwrap();
+    let pool = r2d2::Pool::builder()
+        .build(manager)
+        .unwrap();
     println!("redis client opened");
-    let auth_service = AuthServer::with_interceptor(AuthService::new(db), intercept);
+    let auth_service = AuthServer::with_interceptor(AuthService::new(pool), intercept);
 
     println!("starting server on addres {}...", addr);
 

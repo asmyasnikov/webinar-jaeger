@@ -10,10 +10,10 @@ service Storage {
 
 message PutRequest {
     string url = 1;
+    string hash = 2;
 }
 
 message PutResponse {
-    string hash = 1;
 }
 
 message GetRequest {
