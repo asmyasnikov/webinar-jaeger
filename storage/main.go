@@ -2,10 +2,20 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"github.com/ydb-platform/ydb-go-sdk/v3"
+	"github.com/ydb-platform/ydb-go-sdk/v3/balancers"
+	"github.com/ydb-platform/ydb-go-sdk/v3/trace"
+	"google.golang.org/grpc"
 	"log"
+	"net"
+	"os"
+	"os/signal"
 	"time"
 
+	ydbTracing "github.com/ydb-platform/ydb-go-sdk-opentracing"
+	_ "github.com/ydb-platform/ydb-go-sdk/v3"
 	jaegerPropogator "go.opentelemetry.io/contrib/propagators/jaeger"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -13,10 +23,14 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	tracesdk "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.12.0"
-	"go.opentelemetry.io/otel/trace"
+
+	pb "github.com/asmyasnikov/webinar-jaeger/server/pb"
 )
 
-const applicationID = "http"
+const (
+	applicationID = "storage"
+	port          = 5300
+)
 
 func tracerProvider(url string) (*tracesdk.TracerProvider, error) {
 	exp, err := jaeger.New(jaeger.WithCollectorEndpoint(jaeger.WithEndpoint(url)))
@@ -61,49 +75,58 @@ func main() {
 	ctx, span := tr.Start(ctx, "main")
 	defer span.End()
 
-	a, err := newAuth(ctx, tr, "127.0.0.1:50051")
+	db, err := ydb.Open(ctx, "grpc://localhost:2136/local",
+		ydb.WithBalancer(balancers.SingleConn()),
+		ydbTracing.WithTraces(trace.DetailsAll),
+	)
 	if err != nil {
 		span.SetAttributes(attribute.Bool("error", true))
 		span.RecordError(err)
-		panic(err)
+		return
 	}
-	defer a.Close()
+	defer db.Close(ctx)
 
-	span.AddEvent("auth client initialized")
-
-	token, err := a.Login(ctx, "user1", "user1")
+	connector, err := ydb.Connector(db)
 	if err != nil {
-		span.RecordError(err)
-	} else {
 		span.SetAttributes(attribute.Bool("error", true))
-		span.RecordError(fmt.Errorf("unexpected successful result"), trace.WithAttributes(attribute.String("token", token)))
+		span.RecordError(err)
+		return
 	}
+	defer connector.Close()
 
-	token, err = a.Login(ctx, "user", "user1")
-	if err != nil {
-		span.RecordError(err)
-	} else {
-		span.SetAttributes(attribute.Bool("error", true))
-		span.RecordError(fmt.Errorf("unexpected successful result"), trace.WithAttributes(attribute.String("token", token)))
-	}
-
-	token, err = a.Login(ctx, "user", "user")
+	s, err := newStorage(ctx, tr, sql.OpenDB(connector), db.Name())
 	if err != nil {
 		span.SetAttributes(attribute.Bool("error", true))
 		span.RecordError(err)
+		return
 	}
 
-	err = a.Validate(ctx, "azaza")
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
-		span.RecordError(err)
-	} else {
 		span.SetAttributes(attribute.Bool("error", true))
-		span.RecordError(fmt.Errorf("unexpected successful result"))
+		span.RecordError(err)
+		return
 	}
 
-	err = a.Validate(ctx, token)
-	if err != nil {
-		span.SetAttributes(attribute.Bool("error", true))
-		span.RecordError(err)
+	grpcServer := grpc.NewServer()
+
+	pb.RegisterStorageServer(grpcServer, s)
+	span.AddEvent("storage server registered")
+
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, os.Interrupt)
+
+	go func() {
+		if err := grpcServer.Serve(listener); err != nil {
+			close(ch)
+		}
+	}()
+
+	fmt.Printf("Start starege service on port %d...\n", port)
+
+	for range ch {
+		fmt.Println("shutdown...")
+		span.AddEvent("received interrupt signal")
+		grpcServer.GracefulStop()
 	}
 }

@@ -33,26 +33,27 @@
         <input type="submit" value="Login" id="login-form-submit">
     </form>
 
-    <div id="login-error-msg-holder">
-        <p id="login-error-msg"></span></p>
-    </div>
-
     <div class="row hide" id="source-holder">
         <input id="source" type="text" class="source" placeholder="https://">
-        <button id="button" class="button">
-            Generate
-        </button>
+<!--        <button id="button" class="button">-->
+<!--            Generate-->
+<!--        </button>-->
     </div>
 
     <div class="row hide" id="shorten-holder">
         <a id="shorten" class="shorten" href=""></a>
     </div>
+
+    <div id="error-msg-holder" class="hide">
+        <p id="error-msg"></span></p>
+    </div>
+
     <script>
         (function (){
             const loginForm = document.getElementById("login-form");
             const loginButton = document.getElementById("login-form-submit");
-            const loginErrorMsg = document.getElementById("login-error-msg");
-            const loginErrorMsgHolder = document.getElementById("login-error-msg-holder");
+            const errorMsg = document.getElementById("error-msg");
+            const errorMsgHolder = document.getElementById("error-msg-holder");
             const sourceHolder = document.getElementById("source-holder");
             const shortenHolder = document.getElementById("shorten-holder");
 
@@ -66,23 +67,26 @@
                     }),
                 });
                 if (response.ok) {
+                    errorMsgHolder.setAttribute("class", [...new Set(errorMsgHolder.className.split(" ").concat("hide"))].join(" "));
+                    sourceHolder.setAttribute("class", sourceHolder.className.split(" ").filter(c => c != "hide").join(" "));
                     sourceHolder.setAttribute("class", sourceHolder.className.split(" ").filter(c => c != "hide").join(" "));
                     shortenHolder.setAttribute("class", shortenHolder.className.split(" ").filter(c => c != "hide").join(" "));
                     loginForm.setAttribute("class", loginForm.className.split(" ").concat("hide").join(" "));
-                    loginErrorMsgHolder.setAttribute("class", loginErrorMsgHolder.className.split(" ").concat("hide").join(" "));
                 } else {
-                    loginErrorMsg.innerText = await response.text();
+                    errorMsgHolder.setAttribute("class", errorMsgHolder.className.split(" ").filter(c => c != "hide").join(" "));
+                    errorMsg.innerText = await response.text();
                 }
             })
         })()
     </script>
     <script>
         (function (){
-            let source = document.getElementById("source");
-            let shorten = document.getElementById("shorten");
-            let button = document.getElementById("button");
+            const source = document.getElementById("source");
+            const shorten = document.getElementById("shorten");
+            const errorMsg = document.getElementById("error-msg");
+            const errorMsgHolder = document.getElementById("error-msg-holder");
 
-            button.onclick = async function(e) {
+            source.oninput = async function(e) {
                 e.preventDefault();
 
                 let response = await fetch("shorten", {
@@ -90,11 +94,13 @@
                     body: source.value,
                 });
                 if (response.ok) {
+                    errorMsgHolder.setAttribute("class", [...new Set(errorMsgHolder.className.split(" ").concat("hide"))].join(" "));
+                    let hash = await response.text();
                     shorten.innerText = window.location.protocol + '//' + window.location.host + window.location.pathname + hash;
                     shorten.setAttribute("href", window.location.protocol + '//' + window.location.host + window.location.pathname + hash);
                 } else {
-                    shorten.setAttribute("href", "");
-                    shorten.innerText = await response.text();
+                    errorMsgHolder.setAttribute("class", errorMsgHolder.className.split(" ").filter(c => c != "hide").join(" "));
+                    errorMsg.innerText = await response.text();
                 }
             };
         })()

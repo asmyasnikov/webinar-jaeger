@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"go.opentelemetry.io/otel/attribute"
 	"hash/fnv"
 	"io"
 	"net/http"
@@ -24,7 +25,6 @@ var indexPage string
 
 const (
 	invalidHashError = "'%s' is not a valid short path."
-	hashNotFound     = "hash '%s' is not found"
 	invalidURLError  = "'%s' is not a valid URL."
 )
 
@@ -71,6 +71,8 @@ func (h *handlers) handleLogin(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		writeResponse(w, http.StatusInternalServerError, "read body failed: "+err.Error())
+		span.SetAttributes(attribute.Bool("error", true))
+		span.RecordError(err)
 		return
 	}
 
@@ -78,12 +80,16 @@ func (h *handlers) handleLogin(w http.ResponseWriter, r *http.Request) {
 	err = json.Unmarshal(body, &creds)
 	if err != nil {
 		writeResponse(w, http.StatusBadRequest, "cannot unmarshal body to credentials json: "+err.Error())
+		span.SetAttributes(attribute.Bool("error", true))
+		span.RecordError(err)
 		return
 	}
 
 	token, expireAt, err := h.auth.Login(ctx, creds.Username, creds.Password)
 	if err != nil {
 		writeResponse(w, http.StatusBadRequest, "authenticate failed: "+err.Error())
+		span.SetAttributes(attribute.Bool("error", true))
+		span.RecordError(err)
 		return
 	}
 
@@ -92,10 +98,11 @@ func (h *handlers) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Value:   token,
 		Expires: expireAt,
 	})
+	w.WriteHeader(http.StatusOK)
 }
 
 func (h *handlers) handleIndex(w http.ResponseWriter, r *http.Request) {
-	_, span := h.tr.Start(r.Context(), "login")
+	_, span := h.tr.Start(r.Context(), "index")
 	defer span.End()
 
 	w.Header().Set("Content-Type", "text/html")
@@ -125,38 +132,50 @@ func getHash(s []byte) (string, error) {
 }
 
 func (h *handlers) handleShorten(w http.ResponseWriter, r *http.Request) {
-	ctx, span := h.tr.Start(r.Context(), "login")
+	ctx, span := h.tr.Start(r.Context(), "shorten")
 	defer span.End()
 
 	if c, err := r.Cookie(sessionToken); err != nil {
 		writeResponse(w, http.StatusUnauthorized, "session token expected")
+		span.SetAttributes(attribute.Bool("error", true))
+		span.RecordError(err)
 		return
-	} else if err := h.auth.Validate(r.Context(), c.Value); err != nil {
+	} else if err = h.auth.Validate(ctx, c.Value); err != nil {
 		writeResponse(w, http.StatusUnauthorized, err.Error())
+		span.SetAttributes(attribute.Bool("error", true))
+		span.RecordError(err)
 		return
 	}
 
 	url, err := io.ReadAll(r.Body)
 	if err != nil {
 		writeResponse(w, http.StatusInternalServerError, err.Error())
+		span.SetAttributes(attribute.Bool("error", true))
+		span.RecordError(err)
 		return
 	}
 
 	if !isLongCorrect(string(url)) {
 		err = fmt.Errorf(fmt.Sprintf(invalidURLError, url))
 		writeResponse(w, http.StatusBadRequest, err.Error())
+		span.SetAttributes(attribute.Bool("error", true))
+		span.RecordError(err)
 		return
 	}
 
 	hash, err := getHash(url)
 	if err != nil {
 		writeResponse(w, http.StatusInternalServerError, err.Error())
+		span.SetAttributes(attribute.Bool("error", true))
+		span.RecordError(err)
 		return
 	}
 
 	err = h.storage.Put(ctx, string(url), hash)
 	if err != nil {
 		writeResponse(w, http.StatusInternalServerError, err.Error())
+		span.SetAttributes(attribute.Bool("error", true))
+		span.RecordError(err)
 		return
 	}
 
@@ -165,18 +184,23 @@ func (h *handlers) handleShorten(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handlers) handleLonger(w http.ResponseWriter, r *http.Request) {
-	ctx, span := h.tr.Start(r.Context(), "login")
+	ctx, span := h.tr.Start(r.Context(), "longer")
 	defer span.End()
 
 	path := strings.Split(r.URL.Path, "/")
 	if !isShortCorrect(path[len(path)-1]) {
-		writeResponse(w, http.StatusBadRequest, fmt.Sprintf(invalidHashError, path[len(path)-1]))
+		err := fmt.Errorf(invalidHashError, path[len(path)-1])
+		writeResponse(w, http.StatusBadRequest, err.Error())
+		span.SetAttributes(attribute.Bool("error", true))
+		span.RecordError(err)
 		return
 	}
 
 	url, err := h.storage.Get(ctx, path[len(path)-1])
 	if err != nil {
 		writeResponse(w, http.StatusInternalServerError, err.Error())
+		span.SetAttributes(attribute.Bool("error", true))
+		span.RecordError(err)
 		return
 	}
 
@@ -194,8 +218,6 @@ func (h *handlers) run(ctx context.Context, port int) {
 
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, os.Interrupt)
-	go func() {
-	}()
 
 	go func() {
 		if err := server.ListenAndServe(); err != nil {
@@ -205,8 +227,11 @@ func (h *handlers) run(ctx context.Context, port int) {
 
 	fmt.Printf("Start URL shortener on port %d...\n", port)
 
-	for range ch {
+	for s := range ch {
 		fmt.Println("shutdown...")
+		span.AddEvent("received signal", trace.WithAttributes(
+			attribute.String("signal", s.String()),
+		))
 		_ = server.Shutdown(ctx)
 	}
 }

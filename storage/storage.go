@@ -2,84 +2,161 @@ package main
 
 import (
 	"context"
-
-	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"database/sql"
+	"fmt"
+	"github.com/ydb-platform/ydb-go-sdk/v3"
+	"github.com/ydb-platform/ydb-go-sdk/v3/retry"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
+	"os"
+	"path"
 
 	pb "github.com/asmyasnikov/webinar-jaeger/server/pb"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type storage struct {
+	pb.UnimplementedStorageServer
+
 	tr     trace.Tracer
-	conn   *grpc.ClientConn
-	client pb.AuthClient
+	db     *sql.DB
+	prefix string
 }
 
-func newStorage(ctx context.Context, tr trace.Tracer, addr string) (*storage, error) {
-	_, span := tr.Start(ctx, "newStorage")
-	defer span.End()
+func (s *storage) Put(ctx context.Context, request *pb.PutRequest) (response *pb.PutResponse, err error) {
+	ctx, span := s.tr.Start(ctx, "get", trace.WithAttributes(
+		attribute.String("url", request.GetUrl()),
+		attribute.String("hash", request.GetHash()),
+	))
+	defer func() {
+		if err != nil {
+			span.SetAttributes(attribute.Bool("error", true))
+			span.RecordError(err)
+		} else {
+			span.AddEvent("put done")
+		}
+		span.End()
+	}()
+	err = retry.DoTx(ctx, s.db, func(ctx context.Context, tx *sql.Tx) (err error) {
+		_, err = tx.ExecContext(ctx, fmt.Sprintf(`
+			PRAGMA TablePathPrefix("%s");
 
-	conn, err := grpc.DialContext(ctx, addr,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithUnaryInterceptor(otelgrpc.UnaryClientInterceptor()),
-	)
+			DECLARE $hash AS Text;
+			DECLARE $url AS Text;
+
+			UPSERT INTO urls (hash, url) VALUES ($hash, $url); 
+		`, s.prefix), sql.Named("hash", request.GetHash()), sql.Named("url", request.GetUrl()))
+		return err
+	}, retry.WithDoTxRetryOptions(retry.WithIdempotent(true)))
 	if err != nil {
 		return nil, err
 	}
-
-	return &auth{
-		tr:     tr,
-		conn:   conn,
-		client: pb.NewAuthClient(conn),
-	}, nil
+	return &pb.PutResponse{}, nil
 }
 
-func (a *auth) Close() error {
-	return a.conn.Close()
-}
-
-func (a *auth) Login(ctx context.Context, user, password string) (token string, err error) {
-	ctx, span := a.tr.Start(ctx, "login")
-	defer span.End()
-
+func (s *storage) Get(ctx context.Context, request *pb.GetRequest) (response *pb.GetResponse, err error) {
+	ctx, span := s.tr.Start(ctx, "Get", trace.WithAttributes(
+		attribute.String("hash", request.GetHash()),
+	))
 	defer func() {
 		if err != nil {
 			span.SetAttributes(attribute.Bool("error", true))
 			span.RecordError(err)
 		} else {
-			span.AddEvent("login successful", trace.WithAttributes(
-				attribute.String("token", token),
+			span.AddEvent("get done", trace.WithAttributes(
+				attribute.String("url", response.GetUrl()),
 			))
 		}
+		span.End()
 	}()
-	response, err := a.client.Login(ctx, &pb.LoginRequest{
-		User:     user,
-		Password: password,
-	})
-	if err != nil {
-		return token, err
-	}
+	err = retry.DoTx(ctx, s.db, func(ctx context.Context, tx *sql.Tx) error {
+		row := tx.QueryRowContext(ctx, fmt.Sprintf(`
+			PRAGMA TablePathPrefix("%s");
 
-	return response.GetToken(), nil
+			DECLARE $hash AS Text;
+
+			SELECT url FROM urls WHERE hash = $hash; 
+		`, s.prefix), sql.Named("hash", request.GetHash()))
+		var url sql.NullString
+		if err := row.Scan(&url); err != nil {
+			return err
+		}
+		if !url.Valid {
+			// non-retryable error
+			return fmt.Errorf("url for hash '%s' not found", request.GetHash())
+		}
+		response = &pb.GetResponse{
+			Url: url.String,
+		}
+		return row.Err()
+	}, retry.WithDoTxRetryOptions(retry.WithIdempotent(true)))
+	return response, err
 }
 
-func (a *auth) Validate(ctx context.Context, token string) (err error) {
-	ctx, span := a.tr.Start(ctx, "validate")
-	defer span.End()
+func (s *storage) mustEmbedUnimplementedStorageServer() {
+}
 
+func initSchema(ctx context.Context, tr trace.Tracer, db *sql.DB, prefix string) (err error) {
+	ctx, span := tr.Start(ctx, "initSchema")
 	defer func() {
 		if err != nil {
 			span.SetAttributes(attribute.Bool("error", true))
 			span.RecordError(err)
 		} else {
-			span.AddEvent("validate successful")
+			span.AddEvent("schema prepared")
 		}
+		span.End()
 	}()
-	_, err = a.client.Validate(ctx, &pb.ValidateRequest{
-		Token: token,
-	})
-	return err
+	return retry.Do(ctx, db, func(ctx context.Context, cc *sql.Conn) error {
+		_, err = cc.ExecContext(
+			ydb.WithQueryMode(ctx, ydb.SchemeQueryMode),
+			fmt.Sprintf("DROP TABLE `%s`", path.Join(prefix, "urls")),
+		)
+		if err != nil {
+			_, _ = fmt.Fprintf(os.Stdout, "warn: drop series table failed: %v", err)
+		}
+		_, err = cc.ExecContext(
+			ydb.WithQueryMode(ctx, ydb.SchemeQueryMode),
+			fmt.Sprintf(`
+				PRAGMA TablePathPrefix("%s");
+
+				CREATE TABLE urls (
+					hash Text,
+					url Text,
+					PRIMARY KEY (
+						hash
+					)
+				) WITH (
+					AUTO_PARTITIONING_BY_LOAD = ENABLED
+				);
+			`, prefix),
+		)
+		if err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "create urls table failed: %v", err)
+			return err
+		}
+		return nil
+	}, retry.WithDoRetryOptions(retry.WithIdempotent(true)))
+}
+
+func newStorage(ctx context.Context, tr trace.Tracer, db *sql.DB, prefix string) (_ *storage, err error) {
+	ctx, span := tr.Start(ctx, "newStorage")
+	defer func() {
+		if err != nil {
+			span.SetAttributes(attribute.Bool("error", true))
+			span.RecordError(err)
+		} else {
+			span.AddEvent("put successful")
+		}
+		span.End()
+	}()
+
+	if err = initSchema(ctx, tr, db, prefix); err != nil {
+		return nil, err
+	}
+
+	return &storage{
+		tr:     tr,
+		db:     db,
+		prefix: prefix,
+	}, nil
 }
