@@ -34,6 +34,8 @@ func tracerProvider(url string) (*tracesdk.TracerProvider, error) {
 		)),
 	)
 
+	otel.GetTracerProvider()
+
 	return tp, nil
 }
 

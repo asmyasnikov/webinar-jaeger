@@ -107,7 +107,7 @@ func main() {
 		}
 	}()
 
-	fmt.Printf("Start starege service on port %d...\n", port)
+	fmt.Printf("Start cache service on port %d...\n", port)
 
 	for range ch {
 		fmt.Println("shutdown...")

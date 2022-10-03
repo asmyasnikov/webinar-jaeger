@@ -20,7 +20,7 @@ type storage struct {
 }
 
 func (s *storage) Put(ctx context.Context, request *pb.PutRequest) (response *pb.PutResponse, err error) {
-	ctx, span := s.tr.Start(ctx, "get", trace.WithAttributes(
+	ctx, span := s.tr.Start(ctx, "Put", trace.WithAttributes(
 		attribute.String("url", request.GetUrl()),
 		attribute.String("hash", request.GetHash()),
 	))

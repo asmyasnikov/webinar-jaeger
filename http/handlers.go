@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"go.opentelemetry.io/otel/attribute"
 	"hash/fnv"
 	"io"
 	"net/http"
@@ -17,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/gorilla/mux"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
 

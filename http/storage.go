@@ -19,7 +19,7 @@ type Storage interface {
 	Put(ctx context.Context, url, hash string) (err error)
 }
 
-type coalesceStorage []*storage
+type multiStorage []*storage
 
 func initStorages(ctx context.Context, tr trace.Tracer, addrs ...string) (Storage, error) {
 	if len(addrs) == 1 {
@@ -33,10 +33,10 @@ func initStorages(ctx context.Context, tr trace.Tracer, addrs ...string) (Storag
 		}
 		ss = append(ss, s)
 	}
-	return coalesceStorage(ss), nil
+	return multiStorage(ss), nil
 }
 
-func (ss coalesceStorage) Close() error {
+func (ss multiStorage) Close() error {
 	errs := make([]error, 0, len(ss))
 	for _, s := range ss {
 		err := s.Close()
@@ -50,7 +50,7 @@ func (ss coalesceStorage) Close() error {
 	return nil
 }
 
-func (ss coalesceStorage) Get(ctx context.Context, hash string) (url string, err error) {
+func (ss multiStorage) Get(ctx context.Context, hash string) (url string, err error) {
 	errs := make([]error, 0, len(ss))
 	for _, s := range ss {
 		url, err = s.Get(ctx, hash)
@@ -62,7 +62,7 @@ func (ss coalesceStorage) Get(ctx context.Context, hash string) (url string, err
 	return "", fmt.Errorf("get failed: %v", errs)
 }
 
-func (ss coalesceStorage) Put(ctx context.Context, url, hash string) (err error) {
+func (ss multiStorage) Put(ctx context.Context, url, hash string) (err error) {
 	errs := make([]error, 0, len(ss))
 	for _, s := range ss {
 		err = s.Put(ctx, url, hash)

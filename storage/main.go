@@ -10,7 +10,7 @@ import (
 	"os/signal"
 	"time"
 
-	ydbTracing "github.com/ydb-platform/ydb-go-sdk-opentracing"
+	ydbOtel "github.com/ydb-platform/ydb-go-sdk-opentelemetry"
 	ydb "github.com/ydb-platform/ydb-go-sdk/v3"
 	"github.com/ydb-platform/ydb-go-sdk/v3/balancers"
 	"github.com/ydb-platform/ydb-go-sdk/v3/trace"
@@ -77,7 +77,7 @@ func main() {
 
 	db, err := ydb.Open(ctx, "grpc://localhost:2136/local",
 		ydb.WithBalancer(balancers.SingleConn()),
-		ydbTracing.WithTraces(trace.DetailsAll),
+		ydbOtel.WithTraces(trace.DetailsAll),
 	)
 	if err != nil {
 		span.SetAttributes(attribute.Bool("error", true))
