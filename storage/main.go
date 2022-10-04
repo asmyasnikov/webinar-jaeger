@@ -10,10 +10,8 @@ import (
 	"os/signal"
 	"time"
 
-	ydbOtel "github.com/ydb-platform/ydb-go-sdk-opentelemetry"
 	ydb "github.com/ydb-platform/ydb-go-sdk/v3"
 	"github.com/ydb-platform/ydb-go-sdk/v3/balancers"
-	"github.com/ydb-platform/ydb-go-sdk/v3/trace"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	jaegerPropogator "go.opentelemetry.io/contrib/propagators/jaeger"
 	"go.opentelemetry.io/otel"
@@ -77,7 +75,6 @@ func main() {
 
 	db, err := ydb.Open(ctx, "grpc://localhost:2136/local",
 		ydb.WithBalancer(balancers.SingleConn()),
-		ydbOtel.WithTraces(trace.DetailsAll),
 	)
 	if err != nil {
 		span.SetAttributes(attribute.Bool("error", true))
