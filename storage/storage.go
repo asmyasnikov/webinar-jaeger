@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"go.opentelemetry.io/otel"
 	"os"
 	"path"
 
@@ -18,13 +19,12 @@ import (
 type storage struct {
 	pb.UnimplementedStorageServer
 
-	tr     trace.Tracer
 	db     *sql.DB
 	prefix string
 }
 
 func (s *storage) Put(ctx context.Context, request *pb.PutRequest) (response *pb.PutResponse, err error) {
-	ctx, span := s.tr.Start(ctx, "Put", trace.WithAttributes(
+	ctx, span := otel.GetTracerProvider().Tracer(applicationID).Start(ctx, "Put", trace.WithAttributes(
 		attribute.String("url", request.GetUrl()),
 		attribute.String("hash", request.GetHash()),
 	))
@@ -55,7 +55,7 @@ func (s *storage) Put(ctx context.Context, request *pb.PutRequest) (response *pb
 }
 
 func (s *storage) Get(ctx context.Context, request *pb.GetRequest) (response *pb.GetResponse, err error) {
-	ctx, span := s.tr.Start(ctx, "Get", trace.WithAttributes(
+	ctx, span := otel.GetTracerProvider().Tracer(applicationID).Start(ctx, "Get", trace.WithAttributes(
 		attribute.String("hash", request.GetHash()),
 	))
 	defer func() {
@@ -93,8 +93,8 @@ func (s *storage) Get(ctx context.Context, request *pb.GetRequest) (response *pb
 	return response, err
 }
 
-func initSchema(ctx context.Context, tr trace.Tracer, db *sql.DB, prefix string) (err error) {
-	ctx, span := tr.Start(ctx, "initSchema")
+func initSchema(ctx context.Context, db *sql.DB, prefix string) (err error) {
+	ctx, span := otel.GetTracerProvider().Tracer(applicationID).Start(ctx, "initSchema")
 	defer func() {
 		if err != nil {
 			span.SetAttributes(attribute.Bool("error", true))
@@ -145,8 +145,8 @@ func initSchema(ctx context.Context, tr trace.Tracer, db *sql.DB, prefix string)
 	}, retry.WithDoRetryOptions(retry.WithIdempotent(true)))
 }
 
-func newStorage(ctx context.Context, tr trace.Tracer, db *sql.DB, prefix string) (_ *storage, err error) {
-	ctx, span := tr.Start(ctx, "newStorage")
+func newStorage(ctx context.Context, db *sql.DB, prefix string) (_ *storage, err error) {
+	ctx, span := otel.GetTracerProvider().Tracer(applicationID).Start(ctx, "newStorage")
 	defer func() {
 		if err != nil {
 			span.SetAttributes(attribute.Bool("error", true))
@@ -155,12 +155,11 @@ func newStorage(ctx context.Context, tr trace.Tracer, db *sql.DB, prefix string)
 		span.End()
 	}()
 
-	if err = initSchema(ctx, tr, db, prefix); err != nil {
+	if err = initSchema(ctx, db, prefix); err != nil {
 		return nil, err
 	}
 
 	return &storage{
-		tr:     tr,
 		db:     db,
 		prefix: prefix,
 	}, nil

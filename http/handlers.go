@@ -93,6 +93,8 @@ func (h *handlers) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	span.SetAttributes()
+
 	http.SetCookie(w, &http.Cookie{
 		Name:    sessionToken,
 		Value:   token,

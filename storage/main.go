@@ -48,6 +48,8 @@ func tracerProvider(url string) (*tracesdk.TracerProvider, error) {
 		)),
 	)
 
+	otel.SetTracerProvider(tp)
+
 	return tp, nil
 }
 
@@ -68,9 +70,7 @@ func main() {
 		}
 	}(ctx)
 
-	tr := tp.Tracer(applicationID)
-
-	ctx, span := tr.Start(ctx, "main")
+	ctx, span := otel.GetTracerProvider().Tracer(applicationID).Start(ctx, "main")
 	defer span.End()
 
 	db, err := ydb.Open(ctx, "grpc://localhost:2136/local",
@@ -93,7 +93,7 @@ func main() {
 	}
 	defer connector.Close()
 
-	s, err := newStorage(ctx, tr, sql.OpenDB(connector), db.Name())
+	s, err := newStorage(ctx, sql.OpenDB(connector), db.Name())
 	if err != nil {
 		span.SetAttributes(attribute.Bool("error", true))
 		span.RecordError(err)

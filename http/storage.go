@@ -84,7 +84,9 @@ type storage struct {
 }
 
 func newStorage(ctx context.Context, tr trace.Tracer, addr string) (*storage, error) {
-	_, span := tr.Start(ctx, "newStorage")
+	_, span := tr.Start(ctx, "newStorage", trace.WithAttributes(
+		attribute.String("address", addr),
+	))
 	defer span.End()
 
 	conn, err := grpc.DialContext(ctx, addr,
@@ -92,8 +94,11 @@ func newStorage(ctx context.Context, tr trace.Tracer, addr string) (*storage, er
 		grpc.WithUnaryInterceptor(otelgrpc.UnaryClientInterceptor()),
 	)
 	if err != nil {
+		span.RecordError(err)
 		return nil, err
 	}
+
+	span.AddEvent("connected")
 
 	return &storage{
 		tr:     tr,

@@ -106,7 +106,7 @@ impl Auth for AuthService {
 
         let mut conn = self.pool.get().unwrap();
 
-        let ttl = Duration::from_secs(60);
+        let ttl = Duration::from_secs(600);
 
         let _: () = conn.set_ex(&token, &self.session_id, ttl.as_millis() as usize).unwrap();
 
