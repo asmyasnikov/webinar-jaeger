@@ -27,6 +27,9 @@ services:
       - MON_PORT=8765
     volumes:
       - ydb_data:/ydb_data
+      - ydb_certs:/ydb_certs
 volumes:
   ydb_data:
+    driver: local
+  ydb_certs:
     driver: local
