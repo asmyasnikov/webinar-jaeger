@@ -4,12 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/ydb-platform/ydb-go-sdk/v3/trace"
 	"log"
 	"net"
 	"os"
 	"os/signal"
 	"time"
 
+	ydbOtel "github.com/ydb-platform/ydb-go-sdk-otel"
 	ydb "github.com/ydb-platform/ydb-go-sdk/v3"
 	"github.com/ydb-platform/ydb-go-sdk/v3/balancers"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
@@ -46,6 +48,7 @@ func tracerProvider(url string) (*tracesdk.TracerProvider, error) {
 			semconv.SchemaURL,
 			semconv.ServiceNameKey.String(applicationID),
 		)),
+		tracesdk.WithSampler(tracesdk.AlwaysSample()),
 	)
 
 	otel.SetTracerProvider(tp)
@@ -75,6 +78,7 @@ func main() {
 
 	db, err := ydb.Open(ctx, "grpc://localhost:2136/local",
 		ydb.WithBalancer(balancers.SingleConn()),
+		ydbOtel.WithTraces(nil, trace.DetailsAll),
 	)
 	if err != nil {
 		span.SetAttributes(attribute.Bool("error", true))
